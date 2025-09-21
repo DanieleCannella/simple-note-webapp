@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Le tue Note</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <h1>Le mie Note</h1>
+            <button id="logout-button">Logout</button>
+        </header>
+
+        <div class="notes-editor">
+            <input type="text" id="note-title" placeholder="Titolo della nota...">
+            <textarea id="note-body" placeholder="Scrivi qui la tua nota..."></textarea>
+            <button id="add-note-button">Aggiungi Nota</button>
+        </div>
+
+        <main class="notes-grid">
+            <div class="note-card">
+                <h2>Spesa</h2>
+                <p>Latte, uova, pane, frutta e detersivo.</p>
+            </div>
+            <div class="note-card">
+                <h2>Idee progetto</h2>
+                <p>Creare una web app semplice con HTML e CSS. Aggiungere funzionalità con JavaScript.</p>
+            </div>
+            <div class="note-card">
+                <h2>Promemoria</h2>
+                <p>Chiamare il dentista per appuntamento di controllo.</p>
+            </div>
+        </main>
+    </div>
+</body>
+</html>
