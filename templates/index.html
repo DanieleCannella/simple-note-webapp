@@ -10,28 +10,37 @@
     <div class="app-container">
         <header class="app-header">
             <h1>Le mie Note</h1>
-            <button id="logout-button">Logout</button>
+            <a href="{{ url_for('logout') }}" class="btn btn-danger">Logout</a>
         </header>
 
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-messages">
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
         <div class="notes-editor">
-            <input type="text" id="note-title" placeholder="Titolo della nota...">
-            <textarea id="note-body" placeholder="Scrivi qui la tua nota..."></textarea>
-            <button id="add-note-button">Aggiungi Nota</button>
+            <form method="POST" action="{{ url_for('add_note') }}">
+                <input type="text" id="note-title" name="title" placeholder="Titolo della nota..." required>
+                <textarea id="note-body" name="body" placeholder="Scrivi qui la tua nota..." required></textarea>
+                <button type="submit" class="btn btn-primary btn-block">Aggiungi Nota</button>
+            </form>
         </div>
 
         <main class="notes-grid">
-            <div class="note-card">
-                <h2>Spesa</h2>
-                <p>Latte, uova, pane, frutta e detersivo.</p>
-            </div>
-            <div class="note-card">
-                <h2>Idee progetto</h2>
-                <p>Creare una web app semplice con HTML e CSS. Aggiungere funzionalità con JavaScript.</p>
-            </div>
-            <div class="note-card">
-                <h2>Promemoria</h2>
-                <p>Chiamare il dentista per appuntamento di controllo.</p>
-            </div>
+            {% for note in notes %}
+                <div class="note-card">
+                    <h2>{{ note.title }}</h2>
+                    <p>{{ note.body }}</p>
+                    <a href="{{ url_for('delete_note', note_id=note.id) }}" class="btn btn-danger btn-sm">Elimina</a>
+                </div>
+            {% else %}
+                <p class="no-notes-message">Non hai ancora nessuna nota. Inizia ad aggiungerne una!</p>
+            {% endfor %}
         </main>
     </div>
 </body>

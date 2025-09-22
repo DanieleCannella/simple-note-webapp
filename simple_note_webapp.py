@@ -8,6 +8,13 @@ app = Flask(__name__)
 app.secret_key = b"Really_random_bytes"
 
 
+@app.route("/", methods=["GET", "POST"])
+def root():
+    if "user_id" in session:
+        return redirect(url_for("index"))
+    return redirect(url_for("login"))
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "GET":
@@ -23,7 +30,7 @@ def login():
     elif not password:
         error = "password is required"
     if error:
-        flash(error)
+        flash(error, "error")
         return render_template("auth/login.html")
 
     user = conn.execute("SELECT * FROM user WHERE username = ?", (username,)).fetchone()
@@ -34,7 +41,7 @@ def login():
         error = "Incorrect password."
 
     if error:
-        flash(error)
+        flash(error, "error")
         return render_template("auth/login.html")
 
     session.clear()
@@ -44,15 +51,67 @@ def login():
 
 @app.route("/index", methods=["GET", "POST"])
 def index():
-    if "user_id" in session:
-        return render_template("index.html")
-    return redirect(url_for("login"))
+    if "user_id" not in session:
+        return redirect(url_for("login"))
+
+    conn = get_db_connection()
+    user_id = session["user_id"]
+
+    user_notes = conn.execute(
+        "SELECT * FROM note WHERE author_id = ? ORDER BY created DESC", (user_id,)
+    ).fetchall()
+
+    return render_template("index.html", notes=user_notes)
 
 
 @app.route("/logout")
 def logout():
     session.pop("username", None)
+    flash("Logout effettuato con successo.", "success")
     return redirect(url_for("login"))
+
+
+@app.route("/add_note", methods=["POST"])
+def add_note():
+    if "user_id" not in session:
+        return redirect(url_for("login"))
+
+    title = request.form.get("title")
+    body = request.form.get("body")
+    user_id = session["user_id"]
+
+    if not title or not body:
+        flash("Titolo e corpo della nota sono obbligatori!", "error")
+        return redirect(url_for("index"))
+
+    conn = get_db_connection()
+    conn.execute(
+        "INSERT INTO note (title, body, author_id) VALUES (?, ?, ?)",
+        (title, body, user_id),
+    )
+    conn.commit()
+
+    flash("Nota aggiunta con successo!", "success")
+    return redirect(url_for("index"))
+
+
+@app.route("/delete_note/<int:note_id>")
+def delete_note(note_id):
+    if "user_id" not in session:
+        return redirect(url_for("login"))
+
+    conn = get_db_connection()
+    note_to_delete = conn.execute(
+        "SELECT * FROM note WHERE id = ?", (note_id,)
+    ).fetchone()
+    if note_to_delete and note_to_delete["author_id"] == session["user_id"]:
+        conn.execute("DELETE FROM note WHERE id = ?", (note_id,))
+        conn.commit()
+        flash("Nota eliminata.", "info")
+    else:
+        flash("Operazione non permessa.", "error")
+
+    return redirect(url_for("index"))
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -70,7 +129,7 @@ def register():
         error = "Password is required."
 
     if error:
-        flash(error)
+        flash(error, "error")
         return render_template("auth/register.html")
 
     try:
@@ -82,7 +141,8 @@ def register():
 
     except IntegrityError:
         error = f"User {username} is already registered."
-        flash(error)
+        flash(error, "error")
         return render_template("auth/register.html")
 
+    flash(f"Account creato con successo per {username}!", "success")
     return redirect(url_for("login"))
