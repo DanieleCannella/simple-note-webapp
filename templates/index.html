@@ -34,14 +34,162 @@
         <main class="notes-grid">
             {% for note in notes %}
                 <div class="note-card">
-                    <h2>{{ note.title }}</h2>
-                    <p>{{ note.body }}</p>
-                    <a href="{{ url_for('delete_note', note_id=note.id) }}" class="btn btn-danger btn-sm">Elimina</a>
+                    <div class="note-content">
+                        <h2>{{ note.title }}</h2>
+                        <p class="note-body-preview" data-title="{{ note.title }}" data-body="{{ note.body }}">
+                            {{ note.body }}
+                        </p>
+                    </div>
+                    
+                    <div class="note-actions">
+                        <button class="btn btn-secondary btn-sm edit-note-btn" data-id="{{ note.id }}" data-title="{{ note.title }}" data-body="{{ note.body }}">Modifica</button>
+                        <button class="btn btn-secondary btn-sm open-note-btn" data-title="{{ note.title }}" data-body="{{ note.body }}">Leggi tutto</button>
+                        <a href="{{ url_for('delete_note', note_id=note.id) }}" class="btn btn-danger btn-sm">Elimina</a>
+                    </div>
                 </div>
             {% else %}
                 <p class="no-notes-message">Non hai ancora nessuna nota. Inizia ad aggiungerne una!</p>
             {% endfor %}
         </main>
     </div>
+
+    <div id="note-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <h2 id="modal-title"></h2>
+            <p id="modal-body" class="modal-body"></p>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+
+        // ===================================================
+        // GESTIONE FINESTRA MODALE "LEGGI TUTTO"
+        // ===================================================
+        const modal = document.getElementById('note-modal');
+        if (modal) {
+            const modalTitle = document.getElementById('modal-title');
+            const modalBody = document.getElementById('modal-body');
+            const closeBtn = document.querySelector('.close-button');
+
+            function openModal(title, body) {
+                modalTitle.textContent = title;
+                modalBody.textContent = body;
+                modal.style.display = 'flex';
+            }
+
+            function closeModal() {
+                modal.style.display = 'none';
+            }
+
+            const notesGridForModal = document.querySelector('.notes-grid');
+            if (notesGridForModal) {
+                notesGridForModal.addEventListener('click', function(event) {
+                    const target = event.target;
+                    const openBtn = target.closest('.open-note-btn');
+                    const previewText = target.closest('.note-body-preview');
+
+                    if (openBtn || previewText) {
+                        const dataElement = openBtn || previewText;
+                        const title = dataElement.dataset.title;
+                        const body = dataElement.dataset.body;
+                        openModal(title, body);
+                    }
+                });
+            }
+
+            if(closeBtn) {
+                closeBtn.addEventListener('click', closeModal);
+            }
+
+            window.addEventListener('click', function(event) {
+                if (event.target === modal) {
+                    closeModal();
+                }
+            });
+
+            window.addEventListener('keydown', function(event) {
+                if (event.key === 'Escape' && modal.style.display === 'flex') {
+                    closeModal();
+                }
+            });
+        }
+
+        // ===================================================
+        // GESTIONE ELIMINAZIONE E CREAZIONE NOTE
+        // ===================================================
+
+        // --- Gestione Eliminazione Note ---
+        const notesGridForDelete = document.querySelector('.notes-grid');
+        if (notesGridForDelete) {
+            notesGridForDelete.addEventListener('click', function(event) {
+                const deleteLink = event.target.closest('a.btn-danger');
+                if (!deleteLink) {
+                    return;
+                }
+
+                event.preventDefault();
+
+                fetch(deleteLink.href, {
+                    method: 'GET'
+                })
+                .then(response => {
+                    if (response.ok) {
+                        window.location.reload();
+                    } else {
+                        console.error('Errore durante l\'eliminazione della nota.');
+                    }
+                })
+                .catch(error => console.error('Errore fetch:', error));
+            });
+        }
+
+        // --- Gestione Creazione/Aggiornamento Nota ---
+        const addNoteForm = document.querySelector('.notes-editor form');
+        if (addNoteForm) {
+            addNoteForm.addEventListener('submit', function(event) {
+                event.preventDefault();
+
+                fetch(addNoteForm.action, {
+                    method: 'POST',
+                    body: new FormData(addNoteForm)
+                })
+                .then(response => {
+                    if (response.ok) {
+                        window.location.reload();
+                    } else {
+                        console.error('Errore durante l\'aggiunta della nota.');
+                    }
+                })
+                .catch(error => console.error('Errore fetch:', error));
+            });
+        }
+
+        // --- Precompilazione form per Modifica ---
+        const notesGridForEdit = document.querySelector('.notes-grid');
+        if (notesGridForEdit && addNoteForm) {
+            notesGridForEdit.addEventListener('click', function(event) {
+                const editBtn = event.target.closest('.edit-note-btn');
+                if (!editBtn) return;
+
+                const noteId = editBtn.dataset.id;
+                const title = editBtn.dataset.title || '';
+                const body = editBtn.dataset.body || '';
+
+                const titleInput = document.getElementById('note-title');
+                const bodyInput = document.getElementById('note-body');
+
+                titleInput.value = title;
+                bodyInput.value = body;
+
+                addNoteForm.action = `${window.location.origin}${'{{ url_for('update_note', note_id=0) }}'.replace('0', noteId)}`;
+
+                const submitBtn = addNoteForm.querySelector('button[type="submit"]');
+                if (submitBtn) submitBtn.textContent = 'Aggiorna Nota';
+            });
+        }
+    });
+    </script>
 </body>
 </html>

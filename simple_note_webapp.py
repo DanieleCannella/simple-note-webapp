@@ -114,6 +114,40 @@ def delete_note(note_id):
     return redirect(url_for("index"))
 
 
+@app.route("/update_note/<int:note_id>", methods=["POST"])
+def update_note(note_id):
+    if "user_id" not in session:
+        return redirect(url_for("login"))
+
+    title = request.form.get("title")
+    body = request.form.get("body")
+
+    if not title or not body:
+        flash("Titolo e corpo della nota sono obbligatori!", "error")
+        return redirect(url_for("index"))
+
+    conn = get_db_connection()
+    note_to_update = conn.execute(
+        "SELECT * FROM note WHERE id = ?", (note_id,)
+    ).fetchone()
+
+    if note_to_update is None:
+        flash("Nota non trovata.", "error")
+        return redirect(url_for("index"))
+
+    if note_to_update["author_id"] != session["user_id"]:
+        flash("Operazione non permessa.", "error")
+        return redirect(url_for("index"))
+
+    conn.execute(
+        "UPDATE note SET title = ?, body = ? WHERE id = ?",
+        (title, body, note_id),
+    )
+    conn.commit()
+
+    flash("Nota aggiornata con successo!", "success")
+    return redirect(url_for("index"))
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "GET":
