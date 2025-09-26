@@ -21,32 +21,35 @@ def login():
         return render_template("auth/login.html")
 
     conn = get_db_connection()
-    username = request.form.get("username")
-    password = request.form.get("password")
-    error = None
+    try:
+        username = request.form.get("username")
+        password = request.form.get("password")
+        error = None
 
-    if not username:
-        error = "Username is required"
-    elif not password:
-        error = "password is required"
-    if error:
-        flash(error, "error")
-        return render_template("auth/login.html")
+        if not username:
+            error = "Username is required"
+        elif not password:
+            error = "password is required"
+        if error:
+            flash(error, "danger")
+            return render_template("auth/login.html")
 
-    user = conn.execute("SELECT * FROM user WHERE username = ?", (username,)).fetchone()
+        user = conn.execute("SELECT * FROM user WHERE username = ?", (username,)).fetchone()
 
-    if user is None:
-        error = "Incorrect username."
-    elif not checkpw(password.encode("utf-8"), user["password"]):
-        error = "Incorrect password."
+        if user is None:
+            error = "Incorrect username."
+        elif not checkpw(password.encode("utf-8"), user["password"]):
+            error = "Incorrect password."
 
-    if error:
-        flash(error, "error")
-        return render_template("auth/login.html")
+        if error:
+            flash(error, "danger")
+            return render_template("auth/login.html")
 
-    session.clear()
-    session["user_id"] = user["id"]
-    return redirect(url_for("index"))
+        session.clear()
+        session["user_id"] = user["id"]
+        return redirect(url_for("index"))
+    finally:
+        conn.close()
 
 
 @app.route("/index", methods=["GET", "POST"])
@@ -55,13 +58,14 @@ def index():
         return redirect(url_for("login"))
 
     conn = get_db_connection()
-    user_id = session["user_id"]
-
-    user_notes = conn.execute(
-        "SELECT * FROM note WHERE author_id = ? ORDER BY created DESC", (user_id,)
-    ).fetchall()
-
-    return render_template("index.html", notes=user_notes)
+    try:
+        user_id = session["user_id"]
+        user_notes = conn.execute(
+            "SELECT * FROM note WHERE author_id = ? ORDER BY created DESC", (user_id,)
+        ).fetchall()
+        return render_template("index.html", notes=user_notes)
+    finally:
+        conn.close()
 
 
 @app.route("/logout")
@@ -81,15 +85,18 @@ def add_note():
     user_id = session["user_id"]
 
     if not title or not body:
-        flash("Titolo e corpo della nota sono obbligatori!", "error")
+        flash("Titolo e corpo della nota sono obbligatori!", "danger")
         return redirect(url_for("index"))
 
     conn = get_db_connection()
-    conn.execute(
-        "INSERT INTO note (title, body, author_id) VALUES (?, ?, ?)",
-        (title, body, user_id),
-    )
-    conn.commit()
+    try:
+        conn.execute(
+            "INSERT INTO note (title, body, author_id) VALUES (?, ?, ?)",
+            (title, body, user_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
     flash("Nota aggiunta con successo!", "success")
     return redirect(url_for("index"))
@@ -101,15 +108,18 @@ def delete_note(note_id):
         return redirect(url_for("login"))
 
     conn = get_db_connection()
-    note_to_delete = conn.execute(
-        "SELECT * FROM note WHERE id = ?", (note_id,)
-    ).fetchone()
-    if note_to_delete and note_to_delete["author_id"] == session["user_id"]:
-        conn.execute("DELETE FROM note WHERE id = ?", (note_id,))
-        conn.commit()
-        flash("Nota eliminata.", "info")
-    else:
-        flash("Operazione non permessa.", "error")
+    try:
+        note_to_delete = conn.execute(
+            "SELECT * FROM note WHERE id = ?", (note_id,)
+        ).fetchone()
+        if note_to_delete and note_to_delete["author_id"] == session["user_id"]:
+            conn.execute("DELETE FROM note WHERE id = ?", (note_id,))
+            conn.commit()
+            flash("Nota eliminata.", "info")
+        else:
+            flash("Operazione non permessa.", "danger")
+    finally:
+        conn.close()
 
     return redirect(url_for("index"))
 
@@ -123,60 +133,67 @@ def update_note(note_id):
     body = request.form.get("body")
 
     if not title or not body:
-        flash("Titolo e corpo della nota sono obbligatori!", "error")
+        flash("Titolo e corpo della nota sono obbligatori!", "danger")
         return redirect(url_for("index"))
 
     conn = get_db_connection()
-    note_to_update = conn.execute(
-        "SELECT * FROM note WHERE id = ?", (note_id,)
-    ).fetchone()
+    try:
+        note_to_update = conn.execute(
+            "SELECT * FROM note WHERE id = ?", (note_id,)
+        ).fetchone()
 
-    if note_to_update is None:
-        flash("Nota non trovata.", "error")
-        return redirect(url_for("index"))
+        if note_to_update is None:
+            flash("Nota non trovata.", "danger")
+            return redirect(url_for("index"))
 
-    if note_to_update["author_id"] != session["user_id"]:
-        flash("Operazione non permessa.", "error")
-        return redirect(url_for("index"))
+        if note_to_update["author_id"] != session["user_id"]:
+            flash("Operazione non permessa.", "danger")
+            return redirect(url_for("index"))
 
-    conn.execute(
-        "UPDATE note SET title = ?, body = ? WHERE id = ?",
-        (title, body, note_id),
-    )
-    conn.commit()
+        conn.execute(
+            "UPDATE note SET title = ?, body = ? WHERE id = ?",
+            (title, body, note_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
     flash("Nota aggiornata con successo!", "success")
     return redirect(url_for("index"))
+
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "GET":
         return render_template("auth/register.html")
+    
     conn = get_db_connection()
-    username = request.form.get("username")
-    password = request.form.get("password").encode("utf-8")
-    error = None
-
-    if not username:
-        error = "Username is required."
-    elif not password:
-        error = "Password is required."
-
-    if error:
-        flash(error, "error")
-        return render_template("auth/register.html")
-
     try:
-        conn.execute(
-            "INSERT INTO user (username, password) VALUES (?, ?)",
-            (username, hashpw(password, gensalt())),
-        )
-        conn.commit()
+        username = request.form.get("username")
+        password = request.form.get("password").encode("utf-8")
+        error = None
 
-    except IntegrityError:
-        error = f"User {username} is already registered."
-        flash(error, "error")
-        return render_template("auth/register.html")
+        if not username:
+            error = "Username is required."
+        elif not password:
+            error = "Password is required."
 
-    flash(f"Account creato con successo per {username}!", "success")
-    return redirect(url_for("login"))
+        if error:
+            flash(error, "danger")
+            return render_template("auth/register.html")
+
+        try:
+            conn.execute(
+                "INSERT INTO user (username, password) VALUES (?, ?)",
+                (username, hashpw(password, gensalt())),
+            )
+            conn.commit()
+        except IntegrityError:
+            error = f"User {username} is already registered."
+            flash(error, "danger")
+            return render_template("auth/register.html")
+
+        flash(f"Account creato con successo per {username}!", "success")
+        return redirect(url_for("login"))
+    finally:
+        conn.close()
