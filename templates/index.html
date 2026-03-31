@@ -50,7 +50,9 @@
                             <div class="mt-auto d-flex gap-2">
                                 <button class="btn btn-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#readNoteModal" data-note-title="{{ note.title }}" data-note-body="{{ note.body }}">Leggi</button>
                                 <button class="btn btn-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#editNoteModal" data-note-id="{{ note.id }}" data-note-title="{{ note.title }}" data-note-body="{{ note.body }}">Modifica</button>
-                                <a href="{{ url_for('delete_note', note_id=note.id) }}" class="btn btn-danger btn-sm ms-auto">Elimina</a>
+                                <form action="{{ url_for('delete_note', note_id=note.id) }}" method="POST" class="ms-auto" style="display:inline;">
+                                    <button type="submit" class="btn btn-danger btn-sm">Elimina</button>
+                                </form>
                             </div>
                         </div>
                     </div>
@@ -128,30 +130,9 @@
             const modalBodyTextarea = editNoteModal.querySelector('#edit-modal-body');
             modalTitleInput.value = title;
             modalBodyTextarea.value = body;
-            const actionUrl = "{{ url_for('update_note', note_id=0) }}".replace('0', id);
+            const actionUrl = "{{ url_for('update_note', note_id=0) }}".replace('/0', '/' + id);
             form.action = actionUrl;
         });
-
-        const editNoteForm = document.getElementById('edit-note-form');
-        if (editNoteForm) {
-            editNoteForm.addEventListener('submit', function(event) {
-                event.preventDefault();
-                fetch(editNoteForm.action, {
-                    method: 'POST',
-                    body: new FormData(editNoteForm)
-                })
-                .then(response => {
-                    if (response.ok) {
-                        window.location.reload(); 
-                    } else {
-                        console.error('Errore durante l\'aggiornamento della nota.');
-                    }
-                })
-                .catch(error => {
-                    console.error('Errore fetch:', error);
-                });
-            });
-        }
     });
     </script>
 </body>
