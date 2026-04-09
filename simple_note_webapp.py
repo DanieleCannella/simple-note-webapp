@@ -3,12 +3,34 @@ from bcrypt import hashpw, gensalt, checkpw
 from db_connection import get_db_connection
 from sqlite3 import IntegrityError, Error
 import logging
+from functools import wraps
+
+
+DUMMY_PASSWORD = b"password_finta"
+DUMMY_HASH = hashpw(DUMMY_PASSWORD, gensalt())
 
 app = Flask(__name__)
 
 app.secret_key = b"Really_random_bytes"
 
 app.logger.setLevel(logging.INFO)
+
+def require_user_login(f):
+    @wraps(f) #mantiene nome e docstring della funzione originale, cruciale perchè sennò flask vede le funzioni tutte come la funzione wrapper invece di vedere la funzione originale ma wrappata.
+    def decorated_function(*args, **kwargs):
+        if "user_id" not in session:
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def require_admin_login(f):
+    @wraps(f) #mantiene nome e docstring della funzione originale, cruciale perchè sennò flask vede le funzioni tutte come la funzione wrapper invece di vedere la funzione originale ma wrappata.
+    def decorated_function(*args, **kwargs):
+        if "user_id" not in session or not session.get("is_admin"):
+            return redirect(url_for("admin_login"))
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 @app.route("/", methods=["GET"])
@@ -23,64 +45,67 @@ def login():
     if request.method == "GET":
         return render_template("auth/login.html")
 
-    conn = get_db_connection()
+    username = request.form.get("username")
+    password = request.form.get("password")
+    if not username or not password:
+        flash("Username e password sono obbligatori", "danger")
+        return render_template("auth/login.html")
+
+    success, error_msg, user = db_user_login(username, password)
+
+    if success:
+        session.clear()
+        session["user_id"] = user["id"]
+        app.logger.info(f"L'utente:{username}, ha effettuato l'accesso")
+        return redirect(url_for("index"))
+    else:
+        if error_msg == "user_not_found":
+            app.logger.warning(f"Tentativo di accesso per utente inesistente: '{username}'")
+            flash("Username o password errati", "danger")
+
+        elif error_msg == "wrong_password":
+            app.logger.warning(f"Password errata per l'utente: '{username}'")
+            flash("Username o password errati", "danger")
+                
+        else: # db_error
+            app.logger.error(f"Fallimento login per '{username}' a causa di un errore interno del server.")
+            flash("Errore interno durante il login.", "danger")
+            
+        return render_template("auth/login.html")
+
+
+def db_user_login(username, password):
     try:
-        username = request.form.get("username")
-        password = request.form.get("password")
-        error = None
-
-        if not username:
-            error = "Username is required"
-        elif not password:
-            error = "password is required"
-        if error:
-            flash(error, "danger")
-            return render_template("auth/login.html")
-
+        conn = get_db_connection()
         user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
 
         if user is None:
-            error = "Incorrect username."
+            checkpw(password.encode("utf-8"), DUMMY_HASH) #eseguo un controllo fittizio per evitare timing attack
+            return (False, "user_not_found", None)
         elif not checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
-            error = "Incorrect password."
+            return (False, "wrong_password", None)
+        return (True, None, user)
 
-        if error:
-            flash(error, "danger")
-            return render_template("auth/login.html")
-
-        app.logger.info(f"L'utente:{username}, ha effettuato l'accesso")
-        session.clear()
-        session["user_id"] = user["id"]
-        return redirect(url_for("index"))
     except Error as e:
-        app.logger.error(f"Errore durante l'accesso per l'utente:{username}", exc_info = True)
-        flash("Errore durante l'accesso", "danger")
-        return render_template("auth/login.html")
+            app.logger.error(f"Errore DB durante l'accesso per l'utente: {username}: {e}", exc_info = True)
+            return (False, "db_error", None)
     finally:
-        conn.close()
+        if 'conn' in locals() and conn:
+            conn.close()
 
-@app.route("/admin/login", methods=["GET", "POST"])
-def admin_login():
-    if request.method == "GET":
-        return render_template("auth/admin_login.html")
 
-    conn = get_db_connection()
+
+def db_admin_login(username, password):
     try:
-        username = request.form.get("username")
-        password = request.form.get("password")
-
-        if not username or not password:
-            flash("Username e password sono obbligatori", "danger")
-            return render_template("auth/admin_login.html")
-
-        #controllo se il nome utente esiste e se la password è corretta
+        conn = get_db_connection()
         user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
 
-        if user is None or not checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
-            flash("Username o password non validi.", "danger")
-            return render_template("auth/admin_login.html")
+        if user is None:
+            checkpw(password.encode("utf-8"), DUMMY_HASH) #eseguo un controllo fittizio per evitare timing attack
+            return (False, "admin_not_found", None)
+        elif not checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
+            return (False, "wrong_password", None)
         
-        #controllo tramite l'id dell'utente se quest'ultimo ha i permessi di admin
         is_admin = conn.execute("""
             SELECT 1 FROM user_role U_R
             JOIN roles R ON U_R.role_id = R.id
@@ -88,26 +113,64 @@ def admin_login():
         """, (user["id"],)).fetchone()
 
         if is_admin is None:
-            flash("Accesso negato: sono necessari i privilegi di amministratore.", "danger")
-            app.logger.info(f"L'utente:{username} ha provato ad accedere come Admin")
-            return render_template("auth/admin_login.html")
+            return (False, "Permission_denied", None)
 
+        return (True, None, user)
+
+    except Error as e:
+            app.logger.error(f"Errore DB durante l'accesso per l'admin: {username}: {e}", exc_info = True)
+            return (False, "DB_error", None)
+    finally:
+        if 'conn' in locals() and conn:
+            conn.close()
+
+
+
+
+
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "GET":
+        return render_template("auth/admin_login.html")
+
+    username = request.form.get("username")
+    password = request.form.get("password")
+
+    if not username or not password:
+        flash("Username e password sono obbligatori", "danger")
+        return render_template("auth/admin_login.html")
+
+    success, error_msg, user = db_admin_login(username, password)
+
+    if success:
         session.clear()
         session["user_id"] = user["id"]
         session["is_admin"] = True
         app.logger.info(f"L'utente:{username} ha effettuato l'accesso come admin")
         return redirect(url_for("admin_index"))
-    except Error as e:
-        app.logger.error(f"Errore durante la query di login per l'utente {username}: {e}",exc_info = True)
-        flash(f"errore durante le query per il login", "danger")
+    else:
+        if error_msg == "admin_not_found":
+            app.logger.warning(f"Tentativo di accesso per admin inesistente: '{username}'")
+            flash("Username o password errati", "danger")
+
+        elif error_msg == "wrong_password":
+            app.logger.warning(f"Password errata per l'admin: '{username}'")
+            flash("Username o password errati", "danger")
+
+        elif error_msg == "Permission_denied":
+            app.logger.info(f"Permesso negato: l'utente:{username} ha provato ad accedere come Admin")
+            flash("Operazione negata, necessari permessi admin", "danger")
+
+        else: # db_error
+            app.logger.error(f"Fallimento login per admin: '{username}' a causa di un errore interno del server.")
+            flash("Errore interno durante il login.", "danger")
+            
         return render_template("auth/admin_login.html")
-    finally:
-        conn.close()
 
 @app.route("/admin/users", methods=["GET"])
+@require_admin_login
 def admin_index():
-    if "user_id" not in session or session.get("is_admin") != True:
-        return redirect(url_for("admin_login"))
     conn = get_db_connection()
     try:
         users_and_roles = conn.execute("SELECT U.id, U.username, R.role FROM users U JOIN user_role U_R ON U.id = U_R.user_id JOIN roles R ON U_R.role_id = R.id ").fetchall()
@@ -121,27 +184,15 @@ def admin_index():
 
 
 @app.route("/admin/add_user", methods=["POST"])
+@require_admin_login
 def admin_add_user():
-    if "user_id" not in session or not session.get("is_admin"):
-        return redirect(url_for("admin_login"))
-    conn = get_db_connection()
+    username = request.form.get("username")
+    password = request.form.get("password")
+    role = request.form.get("role")
+    if not username or not password or not role:
+        flash("Username, Password e Role sono obbligatori.", "danger")
+        return redirect(url_for("admin_index"))
     try:
-        username = request.form.get("username")
-        password = request.form.get("password")
-        role = request.form.get("role")
-        error = None
-
-        if not username:
-            error = "Username is required."
-        elif not password:
-            error = "Password is required."
-        elif not role:
-            error = "Role is required."
-
-        if error:
-            flash(error, "danger")
-            return redirect(url_for("admin_index"))
-
         password = password.encode("utf-8")
 
         conn.execute(
@@ -184,10 +235,8 @@ def admin_add_user():
     
 
 @app.route("/admin/delete_user/<int:target_user_id>", methods=["POST"])
-def admin_delete_user(target_user_id):
-    if "user_id" not in session or not session.get("is_admin"):
-        return redirect(url_for("admin_login"))
-        
+@require_admin_login
+def admin_delete_user(target_user_id):        
     #Evita l'auto-eliminazione
     if target_user_id == session["user_id"]:
         flash("Non puoi eliminare il tuo stesso account!", "danger")
@@ -195,10 +244,8 @@ def admin_delete_user(target_user_id):
         return redirect(url_for("admin_index"))
     
 @app.route("/admin/update_role/<int:target_user_id>", methods=["POST"])
+@require_admin_login
 def admin_update_role(target_user_id):
-    if "user_id" not in session or not session.get("is_admin"):
-        return redirect(url_for("admin_login"))
-
     #Evita l'auto-declassamento
     if target_user_id == session["user_id"]:
         flash("Non puoi modificare i tuoi stessi privilegi!", "danger")
@@ -207,10 +254,8 @@ def admin_update_role(target_user_id):
     new_role = request.form.get("role")
     
 @app.route("/index", methods=["GET", "POST"])
+@require_user_login
 def index():
-    if "user_id" not in session:
-        return redirect(url_for("login"))
-
     conn = get_db_connection()
     try:
         user_id = session["user_id"]
@@ -237,10 +282,8 @@ def logout():
 
 
 @app.route("/add_note", methods=["POST"])
+@require_user_login
 def add_note():
-    if "user_id" not in session:
-        return redirect(url_for("login"))
-
     title = request.form.get("title")
     body = request.form.get("body")
     user_id = session["user_id"]
@@ -270,10 +313,8 @@ def add_note():
 
 
 @app.route("/delete_note/<int:note_id>", methods=["POST"])
+@require_user_login
 def delete_note(note_id):
-    if "user_id" not in session:
-        return redirect(url_for("login"))
-
     conn = get_db_connection()
     try:
         note_to_delete = conn.execute(
@@ -297,10 +338,8 @@ def delete_note(note_id):
 
 
 @app.route("/update_note/<int:note_id>", methods=["POST"])
+@require_user_login
 def update_note(note_id):
-    if "user_id" not in session:
-        return redirect(url_for("login"))
-
     title = request.form.get("title")
     body = request.form.get("body")
 
@@ -340,10 +379,8 @@ def update_note(note_id):
 
 
 @app.route("/register", methods=["GET", "POST"])
+@require_user_login
 def register():
-    if request.method == "GET":
-        return render_template("auth/register.html")
-    
     conn = get_db_connection()
     try:
         username = request.form.get("username")
