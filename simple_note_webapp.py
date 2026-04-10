@@ -2,8 +2,10 @@ from flask import Flask, session, render_template, request, redirect, url_for, f
 from bcrypt import hashpw, gensalt, checkpw
 from db_connection import get_db_connection
 from sqlite3 import IntegrityError, Error
-import logging
 from functools import wraps
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 DUMMY_PASSWORD = b"password_finta"
@@ -13,7 +15,6 @@ app = Flask(__name__)
 
 app.secret_key = b"Really_random_bytes"
 
-app.logger.setLevel(logging.INFO)
 
 def require_user_login(f):
     @wraps(f) #mantiene nome e docstring della funzione originale, cruciale perchè sennò flask vede le funzioni tutte come la funzione wrapper invece di vedere la funzione originale ma wrappata.
@@ -40,13 +41,41 @@ def root():
     return redirect(url_for("login"))
 
 
+
+def db_user_login(username, password):
+    try:
+        conn = get_db_connection()
+        user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+
+        if user is None:
+            checkpw(password.encode("utf-8"), DUMMY_HASH) # Controllo fittizio per evitare timing attack
+            logger.warning(f"Tentativo di accesso per utente inesistente: '{username}'")
+            return (False, "user_not_found", None)
+            
+        elif not checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
+            logger.warning(f"Password errata per l'utente: '{username}'")
+            return (False, "wrong_password", None)
+            
+        # Login avvenuto con successo
+        logger.info(f"L'utente '{username}' ha effettuato l'accesso")
+        return (True, None, user)
+
+    except Error as e:
+        logger.error(f"Errore DB durante l'accesso per l'utente '{username}': {e}", exc_info=True)
+        return (False, "DB_error", None)
+    finally:
+        if 'conn' in locals() and conn:
+            conn.close()
+
+
 @app.route("/login", methods=["GET", "POST"])
-def login():
+def user_login():
     if request.method == "GET":
         return render_template("auth/login.html")
 
     username = request.form.get("username")
     password = request.form.get("password")
+    
     if not username or not password:
         flash("Username e password sono obbligatori", "danger")
         return render_template("auth/login.html")
@@ -56,43 +85,15 @@ def login():
     if success:
         session.clear()
         session["user_id"] = user["id"]
-        app.logger.info(f"L'utente:{username}, ha effettuato l'accesso")
         return redirect(url_for("index"))
     else:
-        if error_msg == "user_not_found":
-            app.logger.warning(f"Tentativo di accesso per utente inesistente: '{username}'")
-            flash("Username o password errati", "danger")
-
-        elif error_msg == "wrong_password":
-            app.logger.warning(f"Password errata per l'utente: '{username}'")
+        if error_msg in ["user_not_found", "wrong_password"]:
             flash("Username o password errati", "danger")
                 
-        else: # db_error
-            app.logger.error(f"Fallimento login per '{username}' a causa di un errore interno del server.")
+        else: # DB_error
             flash("Errore interno durante il login.", "danger")
             
         return render_template("auth/login.html")
-
-
-def db_user_login(username, password):
-    try:
-        conn = get_db_connection()
-        user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
-
-        if user is None:
-            checkpw(password.encode("utf-8"), DUMMY_HASH) #eseguo un controllo fittizio per evitare timing attack
-            return (False, "user_not_found", None)
-        elif not checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
-            return (False, "wrong_password", None)
-        return (True, None, user)
-
-    except Error as e:
-            app.logger.error(f"Errore DB durante l'accesso per l'utente: {username}: {e}", exc_info = True)
-            return (False, "db_error", None)
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
-
 
 
 def db_admin_login(username, password):
@@ -101,9 +102,12 @@ def db_admin_login(username, password):
         user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
 
         if user is None:
-            checkpw(password.encode("utf-8"), DUMMY_HASH) #eseguo un controllo fittizio per evitare timing attack
+            checkpw(password.encode("utf-8"), DUMMY_HASH) # Controllo fittizio per evitare timing attack
+            logger.warning(f"Tentativo di accesso per admin inesistente: '{username}'")
             return (False, "admin_not_found", None)
+            
         elif not checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
+            logger.warning(f"Password errata per l'admin: '{username}'")
             return (False, "wrong_password", None)
         
         is_admin = conn.execute("""
@@ -113,20 +117,19 @@ def db_admin_login(username, password):
         """, (user["id"],)).fetchone()
 
         if is_admin is None:
+            logger.info(f"Permesso negato: l'utente '{username}' ha provato ad accedere come Admin")
             return (False, "Permission_denied", None)
 
+        # Login avvenuto con successo
+        logger.info(f"L'utente '{username}' ha effettuato l'accesso come admin")
         return (True, None, user)
 
     except Error as e:
-            app.logger.error(f"Errore DB durante l'accesso per l'admin: {username}: {e}", exc_info = True)
-            return (False, "DB_error", None)
+        logger.error(f"Errore DB durante l'accesso per l'admin '{username}': {e}", exc_info=True)
+        return (False, "DB_error", None)
     finally:
         if 'conn' in locals() and conn:
             conn.close()
-
-
-
-
 
 
 @app.route("/admin/login", methods=["GET", "POST"])
@@ -147,40 +150,42 @@ def admin_login():
         session.clear()
         session["user_id"] = user["id"]
         session["is_admin"] = True
-        app.logger.info(f"L'utente:{username} ha effettuato l'accesso come admin")
         return redirect(url_for("admin_index"))
     else:
-        if error_msg == "admin_not_found":
-            app.logger.warning(f"Tentativo di accesso per admin inesistente: '{username}'")
+        if error_msg in ["admin_not_found", "wrong_password"]:
             flash("Username o password errati", "danger")
-
-        elif error_msg == "wrong_password":
-            app.logger.warning(f"Password errata per l'admin: '{username}'")
-            flash("Username o password errati", "danger")
-
+            
         elif error_msg == "Permission_denied":
-            app.logger.info(f"Permesso negato: l'utente:{username} ha provato ad accedere come Admin")
             flash("Operazione negata, necessari permessi admin", "danger")
-
-        else: # db_error
-            app.logger.error(f"Fallimento login per admin: '{username}' a causa di un errore interno del server.")
+            
+        else: # DB_error
             flash("Errore interno durante il login.", "danger")
             
         return render_template("auth/admin_login.html")
+    
+
+def db_get_users_and_roles():
+    try:
+        conn = get_db_connection()
+        users_and_roles = conn.execute("SELECT U.id, U.username, R.role FROM users U JOIN user_role U_R ON U.id = U_R.user_id JOIN roles R ON U_R.role_id = R.id ").fetchall()
+        return (True, None, users_and_roles)
+    except Error as e:
+        logger.error(f"Errore DB durante il recupero degli utenti e i rispettivi ruoli: {e}", exc_info=True)
+        return (False, "DB_error", None)
+    finally:
+        if 'conn' in locals() and conn:
+            conn.close()
 
 @app.route("/admin/users", methods=["GET"])
 @require_admin_login
 def admin_index():
-    conn = get_db_connection()
-    try:
-        users_and_roles = conn.execute("SELECT U.id, U.username, R.role FROM users U JOIN user_role U_R ON U.id = U_R.user_id JOIN roles R ON U_R.role_id = R.id ").fetchall()
+    success, error_msg, users_and_roles = db_get_users_and_roles()
+    if success:
         return render_template("admin_index.html", users_and_roles=users_and_roles)
-    except Error as e:
-        app.logger.error(f"errore durante l'esecuzione della query per recuperare gli utenti e i rispettivi ruoli: {e}", exc_info = True)
+    else:#  DB_error
         flash("Si è verificato un errore durante il caricamento degli utenti", "danger")
         return render_template("admin_index.html", users_and_roles=[])
-    finally:
-        conn.close()
+
 
 
 @app.route("/admin/add_user", methods=["POST"])
