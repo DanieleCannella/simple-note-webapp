@@ -28,6 +28,16 @@ except Error as e:
 
 try:
 
+    #creo il ruolo Admin
+    conn.execute(
+    "INSERT INTO roles (role, level) VALUES (?, ?)",
+    ("Admin", 10)
+    )
+    #creo il ruolo Moderator
+    conn.execute("INSERT INTO roles (role, level) VALUES (?, ?)",
+    ("Moderator", 5)
+    )
+
     #inserisco un utente Admin di default
     logging.info("Creazione dell'utente Admin di default in corso...")
     username = "Admin"
@@ -37,11 +47,6 @@ try:
         (username, hashpw(password, gensalt()).decode("utf-8")),
     )
 
-    #creo il ruolo Admin
-    conn.execute(
-    "INSERT INTO roles (role) VALUES (?)",
-    ("Admin",)
-    )
 
     # Fornisco all'utente Admin il ruolo Admin
     conn.execute(

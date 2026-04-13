@@ -17,7 +17,7 @@ CREATE TABLE notes (
   title TEXT NOT NULL,
   body TEXT NOT NULL,
   PRIMARY KEY (id) ,
-  FOREIGN KEY (user_id) REFERENCES user(id)
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 /*
 ho scelto di creare una tabella con i ruoli al posto di aggiungere
@@ -30,7 +30,8 @@ Inoltre ho dato per scontato che tutti gli utenti abbiano il ruolo
 
 CREATE TABLE roles (
   id INTEGER,
-  role TEXT NOT NULL,
+  role TEXT NOT NULL UNIQUE,
+  level INTEGER NOT NULL UNIQUE,
   PRIMARY KEY (id) 
 );
 
@@ -38,6 +39,6 @@ CREATE TABLE user_role (
   user_id INTEGER,
   role_id INTEGER,
   PRIMARY KEY (user_id, role_id),
-  FOREIGN KEY (user_id) REFERENCES user(id),
-  FOREIGN KEY (role_id) REFERENCES roles(id)
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
 );
