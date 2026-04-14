@@ -1,9 +1,17 @@
-from flask import Flask, session, render_template, request, redirect, url_for, flash
+from flask import Flask, session, render_template, request, redirect, url_for, flash, g
+from flask_wtf.csrf import CSRFProtect
 from bcrypt import hashpw, gensalt, checkpw
 from db_connection import get_db_connection
 from sqlite3 import IntegrityError, Error
 from functools import wraps
 import logging
+
+
+logging.basicConfig(
+    level=logging.DEBUG, # Registra TUTTO: Debug, Info, Warning, Error, Critical
+    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +23,26 @@ app = Flask(__name__)
 
 app.secret_key = b"Really_random_bytes"
 
+csrf = CSRFProtect(app)
+
+def get_db():
+    """Cerca la connessione in 'g'. Se non c'è la crea"""
+    if 'db' not in g:
+        g.db = get_db_connection() 
+    return g.db
+
+@app.teardown_appcontext
+def close_db(exception=None):
+    """Chiude in automatico la connessione a fine richiesta."""
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
 
 def require_user_login(f):
     @wraps(f) #mantiene nome e docstring della funzione originale, cruciale perchè sennò flask vede le funzioni tutte come la funzione wrapper invece di vedere la funzione originale ma wrappata.
     def decorated_function(*args, **kwargs):
         if "user_id" not in session:
-            return redirect(url_for("login"))
+            return redirect(url_for("user_login"))
         return f(*args, **kwargs)
     return decorated_function
 
@@ -38,13 +60,13 @@ def require_staff_login(f):
 def root():
     if "user_id" in session:
         return redirect(url_for("index"))
-    return redirect(url_for("login"))
+    return redirect(url_for("user_login"))
 
 
 
 def db_user_login(username, password):
     try:
-        conn = get_db_connection()
+        conn = get_db()
         user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
 
         if user is None:
@@ -63,9 +85,6 @@ def db_user_login(username, password):
     except Error as e:
         logger.error(f"Errore DB durante l'accesso per l'utente '{username}': {e}", exc_info=True)
         return (False, "DB_error", None)
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -98,7 +117,7 @@ def user_login():
 
 def db_staff_login(username, password):
     try:
-        conn = get_db_connection()
+        conn = get_db()
         user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
 
         if user is None:
@@ -129,9 +148,6 @@ def db_staff_login(username, password):
     except Error as e:
         logger.error(f"Errore DB durante l'accesso staff '{username}': {e}", exc_info=True)
         return (False, "DB_error", None, None)
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
 
 @app.route("/staff/login", methods=["GET", "POST"])
 def staff_login():
@@ -166,7 +182,7 @@ def staff_login():
 
 def db_get_users_and_roles():
     try:
-        conn = get_db_connection()
+        conn = get_db()
         users_and_roles = conn.execute("""
             SELECT U.id, U.username, COALESCE(R.role, 'User') as role 
             FROM users U 
@@ -177,10 +193,7 @@ def db_get_users_and_roles():
     except Error as e:
         logger.error(f"Errore DB durante il recupero degli utenti e i rispettivi ruoli: {e}", exc_info=True)
         return (False, "DB_error", None)
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
-
+    
 @app.route("/staff/users", methods=["GET"])
 @require_staff_login
 def staff_index():
@@ -194,7 +207,7 @@ def staff_index():
 def db_add_user(username, password, role, staff_username, staff_level):
     password = password.encode("utf-8")
     try:
-        conn = get_db_connection()
+        conn = get_db()
     
         if role == "User":
             conn.execute(
@@ -238,9 +251,6 @@ def db_add_user(username, password, role, staff_username, staff_level):
     except Error as e:
         logger.error(f"Errore DB creazione utente {username} da {staff_username}: {e}", exc_info = True)
         return False, "DB_error"
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
 
 @app.route("/staff/add_user", methods=["POST"])
 @require_staff_login
@@ -268,7 +278,7 @@ def staff_add_user():
 
 def db_delete_user(user_id, staff_username, staff_level):
     try:
-        conn = get_db_connection()
+        conn = get_db()
         
         user_exists = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
         if user_exists is None:
@@ -297,9 +307,6 @@ def db_delete_user(user_id, staff_username, staff_level):
     except Error as e:
         logger.error(f"Errore DB durante l'eliminazione dell'utente {user_id}: {e}", exc_info=True)
         return False, "DB_error"
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
 
 @app.route("/staff/delete_user/<int:user_id>", methods=["POST"])
 @require_staff_login
@@ -324,7 +331,7 @@ def staff_delete_user(user_id):
 
 def db_update_role(user_id, role, staff_username, staff_level):
     try:
-        conn = get_db_connection()
+        conn = get_db()
 
         user_exists = conn.execute("SELECT username FROM users WHERE id = ?", (user_id,)).fetchone()
         if user_exists is None:
@@ -378,10 +385,6 @@ def db_update_role(user_id, role, staff_username, staff_level):
     except Error as e:
         logger.error(f"Errore DB aggiornamento ruolo utente ID {user_id} da {staff_username}: {e}", exc_info=True)
         return False, "DB_error"
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
-
 
 @app.route("/staff/update_role/<int:user_id>", methods=["POST"])
 @require_staff_login
@@ -414,7 +417,7 @@ def staff_update_role(user_id):
     
 def db_get_user_notes(user_id):
     try:
-        conn = get_db_connection()
+        conn = get_db()
         user_notes = conn.execute(
             "SELECT * FROM notes WHERE user_id = ? ORDER BY created DESC", (user_id,)
         ).fetchall()
@@ -422,9 +425,7 @@ def db_get_user_notes(user_id):
     except Error as e:
         logger.error(f"Errore DB durante il recupero note per l'utente {user_id}: {e}", exc_info=True)
         return False, "DB_error", []
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
+
     
 @app.route("/index", methods=["GET"])
 @require_user_login
@@ -448,7 +449,7 @@ def logout():
 
 def db_add_note(title, body, user_id):
     try:
-        conn = get_db_connection()
+        conn = get_db()
         cursor = conn.execute(
             "INSERT INTO notes (title, body, user_id) VALUES (?, ?, ?)",
             (title, body, user_id),
@@ -461,9 +462,6 @@ def db_add_note(title, body, user_id):
     except Error as e:
         logger.error(f"Errore DB inserimento nota per utente {user_id}: {e}", exc_info=True)
         return False, "DB_error"
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
 
 @app.route("/add_note", methods=["POST"])
 @require_user_login
@@ -487,7 +485,7 @@ def add_note():
 
 def db_delete_note(note_id, user_id):
     try:
-        conn = get_db_connection()
+        conn = get_db()
         
         # Selezioniamo solo lo user_id, è più leggero
         note_to_delete = conn.execute(
@@ -509,9 +507,6 @@ def db_delete_note(note_id, user_id):
     except Error as e:
         logger.error(f"Errore DB eliminazione nota {note_id}: {e}", exc_info=True)
         return False, "DB_error"
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
 
 @app.route("/delete_note/<int:note_id>", methods=["POST"])
 @require_user_login
@@ -531,8 +526,7 @@ def delete_note(note_id):
 
 def db_update_note(note_id, user_id, title, body):
     try:
-        conn = get_db_connection()
-        
+        conn = get_db()
 
         note_to_update = conn.execute(
             "SELECT user_id FROM notes WHERE id = ?", (note_id,)
@@ -556,9 +550,6 @@ def db_update_note(note_id, user_id, title, body):
     except Error as e:
         logger.error(f"Errore DB durante la modifica della nota {note_id}: {e}", exc_info=True)
         return False, "DB_error"
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
 
 
 @app.route("/update_note/<int:note_id>", methods=["POST"])
@@ -586,13 +577,10 @@ def update_note(note_id):
 
 
 def db_register_user(username, password):
-    # La codifica in bytes serve a bcrypt
     password_bytes = password.encode("utf-8")
     try:
-        conn = get_db_connection()
+        conn = get_db()
         
-        # Inseriamo l'utente. Essendo la registrazione pubblica, 
-        # non assegniamo ruoli, così gode dell'"Implicit Default Role" (User base)
         conn.execute(
             "INSERT INTO users (username, password) VALUES (?, ?)",
             (username, hashpw(password_bytes, gensalt()).decode("utf-8")),
@@ -608,9 +596,6 @@ def db_register_user(username, password):
     except Error as e:
         logger.error(f"Errore DB durante la registrazione dell'utente '{username}': {e}", exc_info=True)
         return False, "DB_error"
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
 
 
 @app.route("/register", methods=["GET", "POST"])
