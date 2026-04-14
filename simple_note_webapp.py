@@ -165,7 +165,7 @@ def staff_login():
         return render_template("auth/staff_login.html")
 
 def db_get_users_and_roles():
-	try:
+    try:
         conn = get_db_connection()
         users_and_roles = conn.execute("""
             SELECT U.id, U.username, COALESCE(R.role, 'User') as role 
@@ -176,7 +176,7 @@ def db_get_users_and_roles():
         return (True, None, users_and_roles)
     except Error as e:
         logger.error(f"Errore DB durante il recupero degli utenti e i rispettivi ruoli: {e}", exc_info=True)
-	return (False, "DB_error", None)
+        return (False, "DB_error", None)
     finally:
         if 'conn' in locals() and conn:
             conn.close()
