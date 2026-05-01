@@ -1,10 +1,21 @@
+# Ambiente Virtuale
 venv/
+ENV/
+env/
+
+# Python cache
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-database.db
-*.sqlite3
+*.py[cod]
+*$py.class
+
+# Database locali (SQLite)
+*.db
+
+# Segreti (FONDAMENTALE)
+.env
+
+# IDE e Sistema
 .vscode/
+.idea/
 .DS_Store
 Thumbs.db

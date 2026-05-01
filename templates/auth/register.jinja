@@ -1,0 +1,72 @@
+{% extends "base.jinja" %}
+
+{% block title %}Registrazione{% endblock %}
+{% block body_class %}bg-light vh-100 d-flex align-items-center{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center w-100">
+    <div class="col-md-6 col-lg-5">
+        <div class="card shadow-sm border-0">
+            <div class="card-body p-4 p-md-5">
+                <div class="text-center mb-4">
+                    <i class="bi bi-person-plus-fill text-success" style="font-size: 3rem;"></i>
+                    <h2 class="fw-bold">Registrati</h2>
+                </div>
+
+                <form id="register-form" method="POST" class="needs-validation" novalidate>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Nome Utente</label>
+                        <input type="text" class="form-control" name="username" required>
+                        <div class="invalid-feedback">Inserisci un nome utente.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Password</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="password" name="password" required>
+                            <button class="btn btn-outline-secondary toggle-btn" type="button"><i class="bi bi-eye"></i></button>
+                            <div class="invalid-feedback">Inserisci una password.</div>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Conferma Password</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="confirm-password" name="confirm-password" required>
+                            <button class="btn btn-outline-secondary toggle-btn" type="button"><i class="bi bi-eye"></i></button>
+                            <div class="invalid-feedback">Le password non coincidono.</div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-success w-100 py-2 fw-bold">Crea Account</button>
+                </form>
+                
+                <div class="text-center mt-4">
+                    <p class="mb-0">Hai già un account? <a href="{{ url_for('user_login')}}">Accedi</a></p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Logica specifica per il confronto delle password in tempo reale
+    const password = document.getElementById('password');
+    const confirm = document.getElementById('confirm-password');
+
+    function validate() {
+        if (password.value !== confirm.value) {
+            confirm.setCustomValidity('Passwords do not match');
+        } else {
+            confirm.setCustomValidity('');
+        }
+    }
+
+    password.addEventListener('change', validate);
+    confirm.addEventListener('keyup', validate);
+</script>
+{% endblock %}

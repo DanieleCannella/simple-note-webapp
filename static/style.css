@@ -33,15 +33,16 @@ body {
    ================================= */
 
 /* --- Stili per la modale "Leggi Tutto" --- */
-#readNoteModal .modal-title {
-    font-size: 1.75rem;
-    font-weight: bold;
+#readNoteModal .modal-title,
+#editNoteModal .modal-title {
+    word-break: break-all;
+    padding-right: 40px;
+    line-height: 1.2;
 }
 
 #readNoteModal .modal-body {
     font-size: 1.1rem;
     line-height: 1.6;
-    white-space: pre-wrap;
 }
 
 /* =================================
@@ -59,4 +60,15 @@ body {
 #notes-creator-card input[name="title"],
 #edit-modal-title {
     font-weight: bold;
+}
+
+/* =================================
+   STILI PER IL CORPO DELLA NOTA
+   ================================= */
+   .note-card .card-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 4; /* Mostra massimo 4 righe, poi mette i puntini */
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word; /* Spezza le parole infinite senza spazi come "asdfasdf..." */
 }

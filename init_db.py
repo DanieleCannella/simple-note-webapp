@@ -1,73 +1,90 @@
 import sys
 import logging
-from db_connection import get_db_connection
-from sqlite3 import IntegrityError, Error
+import os
+from db_connections import get_db_connection
+from mysql.connector import Error
 from bcrypt import hashpw, gensalt
+from dotenv import load_dotenv
 
+load_dotenv() 
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    level=getattr(logging, os.getenv("LOGGING_LEVEL", "INFO")),
+    format='%(asctime)s | %(levelname)-8s | [%(filename)s:%(lineno)d - %(funcName)s()] | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
-
 
 logging.info("Inizio l'inizializzazione del database...")
 
 conn = get_db_connection()
 
+if conn is None:
+    logging.critical("Impossibile connettersi al database. Uscita.")
+    sys.exit(1)
+
+cursor = conn.cursor()
+
 try:
     with open('schema.sql') as f:
-        conn.executescript(f.read())
-    logging.info("Schema SQL ('schema.sql') eseguito con successo.")
+        sql_script = f.read()
+        sql_commands = sql_script.split(';')
+        
+        for command in sql_commands:
+            if command.strip():
+                cursor.execute(command)
+                
+    logging.info("Schema SQL controllato/eseguito con successo.")
 except FileNotFoundError:
-    logging.critical("Impossibile trovare il file 'schema.sql'. Verifica il percorso.", exc_info=True)
+    logging.critical("Impossibile trovare il file 'schema.sql'. Verifica il percorso.")
+    if cursor: cursor.close()
+    if conn: conn.close()
     sys.exit(1)
 except Error as e:
-    logging.critical(f"Errore del database durante la creazione dello schema: {e}", exc_info=True)
+    logging.critical(f"Errore del database durante la creazione dello schema: {e}")
+    if cursor: cursor.close()
+    if conn: conn.close()
     sys.exit(1)
 
 try:
+    cursor.execute("SELECT count(*) FROM roles WHERE role = 'Admin'")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT INTO roles (role, level) VALUES (%s, %s)", ("Admin", 10))
+        cursor.execute("INSERT INTO roles (role, level) VALUES (%s, %s)", ("Moderator", 5))
+        logging.info("Ruoli di base creati.")
 
-    #creo il ruolo Admin
-    conn.execute(
-    "INSERT INTO roles (role, level) VALUES (?, ?)",
-    ("Admin", 10)
-    )
-    #creo il ruolo Moderator
-    conn.execute("INSERT INTO roles (role, level) VALUES (?, ?)",
-    ("Moderator", 5)
-    )
-
-    #inserisco un utente Admin di default
-    logging.info("Creazione dell'utente Admin di default in corso...")
     username = "Admin"
-    password = "admin".encode("utf-8")
-    conn.execute(
-        "INSERT INTO users (username, password) VALUES (?, ?)",
-        (username, hashpw(password, gensalt()).decode("utf-8")),
-    )
+    cursor.execute("SELECT count(*) FROM users WHERE username = %s", (username,))
+    
+    if cursor.fetchone()[0] == 0:
+        logging.info("Creazione dell'utente Admin di default in corso...")
+        password = "admin".encode("utf-8")
+        
+        cursor.execute(
+            "INSERT INTO users (username, password) VALUES (%s, %s)",
+            (username, hashpw(password, gensalt()).decode("utf-8"))
+        )
 
+        cursor.execute(
+            """
+            INSERT INTO user_role (user_id, role_id)
+            SELECT u.id, r.id
+            FROM users u, roles r
+            WHERE u.username = %s AND r.role = %s
+            """,
+            ("Admin", "Admin")
+        )
+        logging.info("Utente Admin base configurato con successo.")
+    else:
+        logging.info("Il database è già inizializzato (Admin e ruoli già presenti).")
 
-    # Fornisco all'utente Admin il ruolo Admin
-    conn.execute(
-        """
-        INSERT INTO user_role (user_id, role_id)
-        SELECT u.id, r.id
-        FROM users u, roles r
-        WHERE u.username = ? AND r.role = ?
-        """,
-        ("Admin", "Admin")
-    )
     conn.commit()
 
-    logging.info("Utente Admin base e ruoli configurati con successo.")
-
-except IntegrityError as e:
-    logging.critical(f"L'utente Admin esiste già o c'è un conflitto di integrità: {e}")
-    conn.rollback()
 except Error as e:
-    logging.critical(f"Errore del database durante l'inserimento dell'utente Admin: {e}", exc_info=True)
+    logging.critical(f"Errore del database durante l'inserimento dei dati iniziali: {e}", exc_info=True)
     conn.rollback()
 finally:
-    conn.close()
+    if cursor:
+        cursor.close()
+    if conn:
+        conn.close()
     logging.info("Connessione al database chiusa correttamente. Script terminato.")

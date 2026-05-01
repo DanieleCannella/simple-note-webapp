@@ -1,0 +1,53 @@
+services:
+  web:
+    build: .
+    container_name: simple_note_webapp_web
+    restart: always
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app  # Live reload del codice
+    env_file: .env
+    environment:
+      - FLASK_DEBUG=1
+    depends_on:
+      redis:
+        condition: service_started
+      db:
+        condition: service_healthy # Aspetta che il DB sia VERAMENTE pronto
+    # Eseguiamo il tuo script idempotente e poi avviamo l'app
+    command: sh -c "python init_db.py && flask --app simple_note_webapp.py run --host=0.0.0.0"
+  db:
+    image: mysql:8.0
+    container_name: simple_note_webapp_db
+    restart: always
+    env_file: .env
+    environment:
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASS}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASS}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASS}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    
+  redis:
+    image: redis:7-alpine
+    container_name: simple_note_webapp_redis
+    restart: always
+    env_file: .env
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass ${REDIS_PASS}
+    volumes:
+      - redis_data:/data
+
+volumes:
+  mysql_data:
+  redis_data:
