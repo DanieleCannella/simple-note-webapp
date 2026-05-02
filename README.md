@@ -1,7 +1,7 @@
 *Choose your language / Scegli la lingua:*
 
-* [🇬🇧 English](#bookmark=id.y4hdrayzwvrt)  
-* [🇮🇹 Italiano](#bookmark=id.q806rkjrxbbq)
+* [🇬🇧 English](#english-version)  
+* [🇮🇹 Italiano](#versione-italiana)
 
 # **English Version**
 
