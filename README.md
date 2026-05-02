@@ -44,17 +44,18 @@ Simple Note Webapp is a web application developed in Python with the Flask frame
 
 ## **⚙️ Environment Variables**
 
-Before starting the project, the environment must be configured by creating an .env file in the root directory. You can start with the provided .env.example file in the repository.
+Before starting the project, the environment must be configured by creating an .env file in the root directory. You can start with the provided .env.example file in the repository.  
+⚠️ **Security Note:** The placeholder values shown below (especially the passwords and the DEBUG logging level) are strictly intended for local development and testing. **Always use strong, unique passwords and an appropriate logging level (e.g., INFO or WARNING) in a production environment.**
 
-| Variable | Description | Recommended Value for Development |
+| Variable | Description | Example Value (from .env.example) |
 | :---- | :---- | :---- |
 | SECRET\_KEY | Secret key for Flask and CSRF token signing. | *(Generate a secure, random alphanumeric string)* |
-| DB\_NAME, DB\_USER, DB\_PASS | Basic configuration for MySQL access. | nome\_database, nome\_utente, password |
-| DB\_ROOT\_PASS | Password for the MySQL root user (required for Docker). | root\_password |
+| DB\_NAME, DB\_USER, DB\_PASS | Basic configuration for MySQL access. | simple\_note\_db, db\_user, your\_password |
+| DB\_ROOT\_PASS | Password for the MySQL root user (required for Docker). | your\_root\_password |
 | DB\_HOST | Database hostname (db if running in Docker, localhost if running locally). | db |
 | DB\_POOL\_NAME, DB\_POOL\_SIZE | Name and size of the MySQL connection pool. | simple\_note\_pool, 5 |
-| REDIS\_PASS, REDIS\_URL | Password and full URL for connecting to the Redis server. | redis://:password@redis:6379/0 (if in Docker) |
-| LOGGING\_LEVEL | Logging verbosity level (DEBUG, INFO, WARNING, ERROR, CRITICAL). | DEBUG |
+| REDIS\_PASS, REDIS\_URL | Password and full URL for connecting to the Redis server. | redis://:your\_redis\_pwd@redis:6379/0 (if in Docker) |
+| LOGGING\_LEVEL | Logging verbosity level. | DEBUG *(Use INFO in production)* |
 | SESSION\_TIMEOUT\_MINUTES | Minutes of inactivity before the standard session expires. | 5 |
 | SESSION\_TIMEOUT\_REMEMBER\_ME\_DAYS | Days the session remains valid if "Remember Me" is selected. | 30 |
 
@@ -69,13 +70,11 @@ Using Docker and Docker Compose is the quickest way to test and deploy the appli
 ### **Procedure**
 
 1. **Copy the configuration file:**  
-   cp .env.example .env
-
+   cp .env.example .env  
    *Ensure that DB\_HOST is set to db (the service name in docker-compose).*  
 2. **Build and start the containers:**  
    Run the following command in the root directory:  
-   docker-compose up \-d \--build
-
+   docker-compose up \-d \--build  
    Docker will download the images, build the Flask application, and start all services in the background. On the first launch, the web container will automatically run the init\_db.py script, which will configure the database schema and create the initial administrator account.
 
 ## **💻 Setup in a Local Environment (Without Docker)**
@@ -93,14 +92,12 @@ If you prefer to run the application natively without containers, follow these s
 1. **Set up the virtual environment and install dependencies:**  
    python \-m venv venv  
    source venv/bin/activate  \# On Windows use: venv\\Scripts\\activate  
-   pip install \-r requirements.txt
-
+   pip install \-r requirements.txt  
 2. **Prepare the environment variables:**  
    Copy .env.example to .env. Set DB\_HOST=localhost and ensure that the MySQL credentials and the Redis URL match your local configuration.  
 3. **Initialize the Database:**  
    Run the initial configuration script to create tables and roles:  
-   python init\_db.py
-
+   python init\_db.py  
 4. **Start the Flask application:**  
    flask \--app simple\_note\_webapp.py run \--host=0.0.0.0
 
@@ -169,17 +166,18 @@ Simple Note Webapp è un'applicazione web sviluppata in Python con il framework 
 
 ## **⚙️ Variabili d'Ambiente**
 
-Prima di avviare il progetto, è necessario configurare l'ambiente creando un file .env nella directory principale. Puoi partire dal file di esempio .env.example fornito nel repository.
+Prima di avviare il progetto, è necessario configurare l'ambiente creando un file .env nella directory principale. Puoi partire dal file di esempio .env.example fornito nel repository.  
+⚠️ **Nota di Sicurezza:** I valori mostrati di seguito (specialmente le password e il livello di log DEBUG) sono da intendersi esclusivamente come segnaposto per lo sviluppo locale e il test. **Utilizza sempre password sicure e univoche e un livello di log appropriato (es. INFO o WARNING) in un ambiente di produzione reale.**
 
-| Variabile | Descrizione | Valore Consigliato in Sviluppo |
+| Variabile | Descrizione | Valore di Esempio (da .env.example) |
 | :---- | :---- | :---- |
 | SECRET\_KEY | Chiave segreta per Flask e la firma dei token CSRF. | *(Genera una stringa alfanumerica sicura e casuale)* |
-| DB\_NAME, DB\_USER, DB\_PASS | Configurazione base per l'accesso a MySQL. | nome\_database, nome\_utente, password |
-| DB\_ROOT\_PASS | Password per l'utente root di MySQL (necessaria per Docker). | root\_password |
+| DB\_NAME, DB\_USER, DB\_PASS | Configurazione base per l'accesso a MySQL. | simple\_note\_db, db\_user, tua\_password |
+| DB\_ROOT\_PASS | Password per l'utente root di MySQL (necessaria per Docker). | tua\_password\_root |
 | DB\_HOST | Hostname del database (db se esegui in Docker, localhost se in locale). | db |
 | DB\_POOL\_NAME, DB\_POOL\_SIZE | Nome e dimensione del pool di connessioni a MySQL. | simple\_note\_pool, 5 |
-| REDIS\_PASS, REDIS\_URL | Password e URL completo per la connessione al server Redis. | redis://:password@redis:6379/0 (se in Docker) |
-| LOGGING\_LEVEL | Livello verbosità dei log (DEBUG, INFO, WARNING, ERROR, CRITICAL). | DEBUG |
+| REDIS\_PASS, REDIS\_URL | Password e URL completo per la connessione al server Redis. | redis://:tua\_pwd\_redis@redis:6379/0 (se in Docker) |
+| LOGGING\_LEVEL | Livello verbosità dei log. | DEBUG *(Usa INFO in produzione)* |
 | SESSION\_TIMEOUT\_MINUTES | Minuti di inattività prima della scadenza della sessione standard. | 5 |
 | SESSION\_TIMEOUT\_REMEMBER\_ME\_DAYS | Giorni di validità della sessione se viene selezionato "Ricordami". | 30 |
 
@@ -194,13 +192,11 @@ L'utilizzo di Docker e Docker Compose è il modo più rapido per testare e distr
 ### **Procedura**
 
 1. **Copia il file di configurazione:**  
-   cp .env.example .env
-
+   cp .env.example .env  
    *Assicurati che DB\_HOST sia impostato su db (il nome del servizio su docker-compose).*  
 2. **Costruisci e avvia i container:**  
    Esegui il seguente comando nella directory principale:  
-   docker-compose up \-d \--build
-
+   docker-compose up \-d \--build  
    Docker scaricherà le immagini, costruirà l'applicazione Flask e avvierà tutti i servizi in background. Al primo avvio, il container web eseguirà automaticamente lo script init\_db.py, che configurerà lo schema del database e creerà l'account amministratore iniziale.
 
 ## **💻 Setup in Ambiente Locale (Senza Docker)**
@@ -218,14 +214,12 @@ Se preferisci eseguire l'applicazione nativamente senza container, segui questi 
 1. **Configura l'ambiente virtuale e installa le dipendenze:**  
    python \-m venv venv  
    source venv/bin/activate  \# Su Windows usa: venv\\Scripts\\activate  
-   pip install \-r requirements.txt
-
+   pip install \-r requirements.txt  
 2. **Prepara le variabili d'ambiente:**  
    Copia .env.example in .env. Imposta DB\_HOST=localhost e assicurati che le credenziali di MySQL e l'URL di Redis corrispondano alla tua configurazione locale.  
 3. **Inizializza il Database:**  
    Esegui lo script di configurazione iniziale per creare tabelle e ruoli:  
-   python init\_db.py
-
+   python init\_db.py  
 4. **Avvia l'applicazione Flask:**  
    flask \--app simple\_note\_webapp.py run \--host=0.0.0.0
 
