@@ -16,51 +16,62 @@ try:
         password=os.getenv("DB_PASS"),
         database=os.getenv("DB_NAME")
     )
-    logger.info("Connection pool al database inizializzato con successo.")
+    logger.info("Database connection pool initialized (Size: %s)", os.getenv("DB_POOL_SIZE"))
 except Error as e:
-    logger.critical(f"Errore critico durante la creazione del connection pool: {e}")
+    logger.critical("Database pool initialization failed: %s", e)
     db_pool = None
 
 def get_db_connection():
-    """Connessione prelevata dal pool invece che creata da zero"""
+    """Fetch connection from the pool instead of creating a new one"""
     if db_pool is None:
-        logger.error("Il pool di connessioni non è disponibile.")
+        logger.error("Connection request denied: database pool is unavailable")
         return None
         
     try:
         return db_pool.get_connection()
     except Error as e:
-        logger.error(f"Errore durante il recupero della connessione dal pool: {e}")
+        logger.error("Pool connection retrieval failed: %s", e)
         return None
 
 def get_db():
-    """Recupera o crea la connessione per la richiesta corrente in Flask 'g'"""
+    """Retrieve or create the connection for the current Flask request in 'g'"""
     if 'db' not in g:
         g.db = get_db_connection()
     return g.db
 
 def close_db(e=None):
-    """Restituisce la connessione al pool"""
+    """Return the connection to the pool"""
     db = g.pop('db', None)
     if db is not None:
         db.close()
 
 def init_app(app):
     """
-    Registra la funzione di teardown (close_db) in Flask per garantire che la
-    connessione al DB venga restituita al pool al termine di ogni richiesta.
+    Register the teardown function (close_db) in Flask to ensure that the
+    DB connection is returned to the pool at the end of each request.
     """
     app.teardown_appcontext(close_db)
 
+class DatabaseUnavailableError(Exception):
+    """Raised when the connection pool is empty or the database is down."""
+    pass
 
 def get_db_and_cursor(dictionary=True):
+    """
+    Retrieves the active database connection and initializes a cursor.
+    Ideal for write operations (INSERT, UPDATE, DELETE) where 'conn.commit()' is required.
+    """
     conn = get_db()
     if conn is None:
-        raise Error("Impossibile comunicare con il database: connessione assente.")
+        raise DatabaseUnavailableError("Database communication failed: missing connection")
     return conn, conn.cursor(dictionary=dictionary)
 
 def get_cursor(dictionary=True):
+    """
+    Retrieves only a cursor from the active database connection.
+    Ideal for read-only operations (SELECT) where no commit is needed.
+    """
     conn = get_db()
     if conn is None:
-        raise Error("Impossibile comunicare con il database: connessione assente.")
+        raise DatabaseUnavailableError("Database communication failed: missing connection")
     return conn.cursor(dictionary=dictionary)

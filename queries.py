@@ -2,10 +2,10 @@ import logging
 from mysql.connector import Error, IntegrityError
 from bcrypt import hashpw, gensalt, checkpw
 import db_connections
-from datetime import timedelta
+from db_connections import DatabaseUnavailableError
 
 logger = logging.getLogger(__name__)
-DUMMY_PASSWORD = b"password_finta"
+DUMMY_PASSWORD = b"dummy_password"
 DUMMY_HASH = hashpw(DUMMY_PASSWORD, gensalt())
 
 
@@ -17,18 +17,20 @@ def user_login(username, password):
 
         if user is None:
             checkpw(password.encode("utf-8"), DUMMY_HASH)
-            logger.warning(f"Tentativo di accesso per utente inesistente: '{username}'")
+            #no f-string in logger messager, for better performance due to lazy evaluation. 
+            logger.warning("Login failed: user not found (Username: '%s')", username)
             return False, "user_not_found", None
             
         elif not checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
-            logger.warning(f"Password errata per l'utente: '{username}'")
+            logger.warning("Login failed: incorrect password (Username: '%s')", username)
             return False, "wrong_password", None
             
-        logger.info(f"L'utente '{username}' ha effettuato l'accesso")
+        logger.info("Login successful (User ID: %s, Username: '%s')", user["id"], username)
         return True, None, user
 
-    except Error as e:
-        logger.error(f"Errore DB durante l'accesso per l'utente '{username}': {e}", exc_info=True)
+    #at the moment we capture and treat both exception like they are the same. 
+    except (Error, DatabaseUnavailableError) as e:
+        logger.error("Query failed: user login '%s' - Error: %s", username, e, exc_info=True)
         return False, "DB_error", None
     finally:
         if 'cursor' in locals() and cursor:
@@ -43,11 +45,11 @@ def staff_login(username, password):
 
         if user is None:
             checkpw(password.encode("utf-8"), DUMMY_HASH)
-            logger.warning(f"Tentativo di accesso per staff inesistente: '{username}'")
+            logger.warning("Staff login failed: user not found (Attempted Username: '%s')", username)
             return False, "staff_not_found", None, None
             
         elif not checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
-            logger.warning(f"Password errata per lo staff: '{username}'")
+            logger.warning("Staff login failed: incorrect password (Target ID: %s)", user["id"])
             return False, "wrong_password", None, None
         
         cursor.execute("""
@@ -59,14 +61,14 @@ def staff_login(username, password):
         role_data = cursor.fetchone()
 
         if role_data is None or role_data["level"] < 5:
-            logger.warning(f"Permesso negato: l'utente '{username}' ha provato ad accedere allo staff")
+            logger.warning("Permission denied: staff access refused (User ID: %s)", user["id"])
             return False, "Permission_denied", None, None
 
-        logger.info(f"Lo staff '{username}' (Livello {role_data['level']}) ha effettuato l'accesso")
+        logger.info("Staff login successful (Staff ID: %s, Level: %s)", user["id"], role_data['level'])
         return True, None, user, role_data
 
-    except Error as e:
-        logger.error(f"Errore DB durante l'accesso staff '{username}': {e}", exc_info=True)
+    except (Error, DatabaseUnavailableError) as e:
+        logger.error("Query failed: staff login '%s' - Error: %s", username, e, exc_info=True)
         return False, "DB_error", None, None
     finally:
         if 'cursor' in locals() and cursor:
@@ -84,8 +86,8 @@ def get_users_and_roles():
         """)
         users_and_roles = cursor.fetchall()
         return True, None, users_and_roles
-    except Error as e:
-        logger.error(f"Errore DB durante il recupero degli utenti e ruoli: {e}", exc_info=True)
+    except (Error, DatabaseUnavailableError) as e:
+        logger.error("Query failed: fetch users and roles - Error: %s", e, exc_info=True)
         return False, "DB_error", None
     finally:
         if 'cursor' in locals() and cursor:
@@ -102,25 +104,28 @@ def add_user(username, password, role, staff_username, staff_level):
                 "INSERT INTO users (username, password) VALUES (%s, %s)",
                 (username, hashpw(password_bytes, gensalt()).decode("utf-8"))
             )
+            new_user_id = cursor.lastrowid
             conn.commit()
-            logger.info(f"Lo staff {staff_username} ha creato l'utente base: {username}")
+            logger.info("User created: ID %s (Action by Staff: '%s')", new_user_id, staff_username)
             return True, None
         
         cursor.execute("SELECT id, role, level FROM roles WHERE role = %s", (role,))
         role_info = cursor.fetchone()
         
         if role_info is None:
-            logger.warning(f"Tentativo di assegnare ruolo inesistente: {role} a {username}")
+            logger.warning("User creation failed: unknown role '%s' requested", role)
             return False, "unknown_role"
 
         if staff_level <= role_info["level"]:
-            logger.warning(f"Permessi insufficienti: {staff_username} (Lvl {staff_level}) ha provato a creare un {role} (Lvl {role_info['level']})")
+            logger.warning("Permission denied: insufficient privileges to create role (Staff Lvl %s -> Target Role Lvl %s)", staff_level, role_info['level'])
             return False, "permission_denied"
 
         cursor.execute(
             "INSERT INTO users (username, password) VALUES (%s, %s)",
             (username, hashpw(password_bytes, gensalt()).decode("utf-8"))
         )
+
+        new_user_id = cursor.lastrowid
         
         cursor.execute(
             """
@@ -130,14 +135,14 @@ def add_user(username, password, role, staff_username, staff_level):
             (role_info["id"], username)
         )
         conn.commit()
-        logger.info(f"Lo staff {staff_username} ha creato l'utente: {username} con ruolo {role}")
+        logger.info("User created: ID %s with role ID %s (Action by Staff: '%s')", new_user_id, role_info["id"], staff_username)
         return True, None
         
     except IntegrityError:
-        logger.warning(f"Lo staff {staff_username} ha provato a creare un utente già presente: {username}")
+        logger.warning("User creation failed: username already in use '%s'", username)
         return False, "integrity_error"
-    except Error as e:
-        logger.error(f"Errore DB creazione utente {username} da {staff_username}: {e}", exc_info=True)
+    except (Error, DatabaseUnavailableError) as e:
+        logger.error("Query failed: user creation - Error: %s", e, exc_info=True)
         return False, "DB_error"
     finally:
         if 'cursor' in locals() and cursor:
@@ -163,16 +168,16 @@ def delete_user(user_id, staff_username, staff_level):
         user_level = user_info["max_level"] if user_info and user_info["max_level"] is not None else 0
         
         if staff_level <= user_level:
-            logger.warning(f"Permessi insufficienti: {staff_username} (Lvl {staff_level}) ha provato a eliminare ID {user_id} (Lvl {user_level})")
+            logger.warning("Permission denied: insufficient privileges for deletion (Staff Lvl %s -> Target ID %s Lvl %s)", staff_level, user_id, user_level)
             return False, "permission_denied"
             
         cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
         conn.commit()
-        logger.info(f"L'utente ID {user_id} è stato eliminato da {staff_username}")
+        logger.info("User deleted: Target ID %s (Action by Staff: '%s')", user_id, staff_username)
         return True, None
 
-    except Error as e:
-        logger.error(f"Errore DB durante l'eliminazione dell'utente {user_id}: {e}", exc_info=True)
+    except (Error, DatabaseUnavailableError) as e:
+        logger.error("Query failed: user deletion Target ID %s - Error: %s", user_id, e, exc_info=True)
         return False, "DB_error"
     finally:
         if 'cursor' in locals() and cursor:
@@ -201,7 +206,7 @@ def update_role(user_id, role, staff_username, staff_level):
         user_level = user_info["max_level"] if user_info and user_info["max_level"] is not None else 0
 
         if staff_level <= user_level:
-            logger.warning(f"Permessi insufficienti: {staff_username} (Lvl {staff_level}) ha provato a modificare {username} (Lvl {user_level})")
+            logger.warning("Permission denied: insufficient privileges on target (Staff Lvl %s -> Target ID %s Lvl %s)", staff_level, user_id, user_level)
             return False, "permission_denied"
 
         if role == "User":
@@ -211,13 +216,14 @@ def update_role(user_id, role, staff_username, staff_level):
             cursor.execute("SELECT id, level FROM roles WHERE role = %s", (role,))
             role_data = cursor.fetchone()
             if role_data is None:
-                logger.info(f"Tentativo di assegnare ruolo inesistente: {role} a {username}")
+                logger.warning("Role update failed: unknown role '%s'", role)
                 return False, "unknown_role"
             role_id = role_data["id"]
             role_level = role_data["level"]
 
         if staff_level <= role_level:
-            logger.warning(f"Permessi insufficienti: {staff_username} (Lvl {staff_level}) ha provato a promuovere {username} a {role} (Lvl {role_level})")
+            logger.warning("Permission denied: insufficient privileges for role assignment (Staff Lvl %s -> New Role ID %s Lvl %s)", 
+                           staff_level, role_id, role_level)
             return False, "permission_denied"
 
         cursor.execute("DELETE FROM user_role WHERE user_id = %s", (user_id,))
@@ -229,11 +235,11 @@ def update_role(user_id, role, staff_username, staff_level):
             )
 
         conn.commit()
-        logger.info(f"Lo staff {staff_username} ha aggiornato il ruolo di {username} a {role}")
+        logger.info("Role updated: Target ID %s changed to Role ID %s (Action by Staff: '%s')", user_id, role_id, staff_username)
         return True, None
 
-    except Error as e:
-        logger.error(f"Errore DB aggiornamento ruolo utente ID {user_id} da {staff_username}: {e}", exc_info=True)
+    except (Error, DatabaseUnavailableError) as e:
+        logger.error("Query failed: role update Target ID %s - Error: %s", user_id, e, exc_info=True)
         return False, "DB_error"
     finally:
         if 'cursor' in locals() and cursor:
@@ -247,8 +253,8 @@ def get_user_notes_by_modified(user_id, ascending, limit, offset):
         cursor.execute(query, (user_id, limit, offset))
         user_notes = cursor.fetchall()
         return True, None, user_notes
-    except Error as e:
-        logger.error(f"Errore DB: {e}", exc_info=True)
+    except (Error, DatabaseUnavailableError) as e:
+        logger.error("Query failed: fetch notes by_modified (User ID: %s) - Error: %s", user_id, e, exc_info=True)
         return False, "DB_error", []
     finally:
         if 'cursor' in locals() and cursor:
@@ -262,8 +268,8 @@ def get_user_notes_by_created(user_id, ascending, limit, offset):
         cursor.execute(query, (user_id, limit, offset))
         user_notes = cursor.fetchall()
         return True, None, user_notes
-    except Error as e:
-        logger.error(f"Errore DB: {e}", exc_info=True)
+    except (Error, DatabaseUnavailableError) as e:
+        logger.error("Query failed: fetch notes by_created (User ID: %s) - Error: %s", user_id, e, exc_info=True)
         return False, "DB_error", []
     finally:
         if 'cursor' in locals() and cursor:
@@ -277,8 +283,8 @@ def get_user_notes_ordered_by_title(user_id, ascending, limit, offset):
         cursor.execute(query, (user_id, limit, offset))
         user_notes = cursor.fetchall()
         return True, None, user_notes
-    except Error as e:
-        logger.error(f"Errore DB: {e}", exc_info=True)
+    except (Error, DatabaseUnavailableError) as e:
+        logger.error("Query failed: fetch notes by_title (User ID: %s) - Error: %s", user_id, e, exc_info=True)
         return False, "DB_error", []
     finally:
         if 'cursor' in locals() and cursor:
@@ -291,8 +297,8 @@ def get_user_notes_count(user_id):
         cursor.execute("SELECT COUNT(*) as total FROM notes WHERE user_id = %s", (user_id,))
         result = cursor.fetchone()
         return True, None, result['total']
-    except Error as e:
-        logger.error(f"Errore DB conteggio note: {e}", exc_info=True)
+    except (Error, DatabaseUnavailableError) as e:
+        logger.error("Query failed: fetch notes count (User ID: %s) - Error: %s", user_id, e, exc_info=True)
         return False, "DB_error", 0
     finally:
         if 'cursor' in locals() and cursor:
@@ -311,10 +317,10 @@ def add_note(title, body, user_id):
         conn.commit()
         
         new_note_id = cursor.lastrowid
-        logger.info(f"L'utente {user_id} ha aggiunto la nota {new_note_id}")
+        logger.info("Note created: Note ID %s (Owner ID: %s)", new_note_id, user_id)
         return True, None
-    except Error as e:
-        logger.error(f"Errore DB inserimento nota per utente {user_id}: {e}", exc_info=True)
+    except (Error, DatabaseUnavailableError) as e:
+        logger.error("Query failed: insert note (User ID: %s) - Error: %s", user_id, e, exc_info=True)
         return False, "DB_error"
     finally:
         if 'cursor' in locals() and cursor:
@@ -332,16 +338,16 @@ def delete_note(note_id, user_id):
             return False, "note_not_found"
 
         if note_to_delete["user_id"] != user_id:
-            logger.warning(f"Permessi negati: l'utente {user_id} ha provato a eliminare la nota {note_id} dell'utente {note_to_delete['user_id']}")
+            logger.warning("Permission denied: attempt to delete foreign note (Attempting User ID: %s -> Target Note ID: %s, Owner ID: %s)", user_id, note_id, note_to_delete['user_id'])
             return False, "permission_denied"
 
         cursor.execute("DELETE FROM notes WHERE id = %s", (note_id,))
         conn.commit()
-        logger.info(f"Eliminata la nota {note_id} dall'utente {user_id}")
+        logger.info("Note deleted: Note ID %s (Owner ID: %s)", note_id, user_id)
         return True, None
         
-    except Error as e:
-        logger.error(f"Errore DB eliminazione nota {note_id}: {e}", exc_info=True)
+    except (Error, DatabaseUnavailableError) as e:
+        logger.error("Query failed: delete note ID %s - Error: %s", note_id, e, exc_info=True)
         return False, "DB_error"
     finally:
         if 'cursor' in locals() and cursor:
@@ -359,7 +365,7 @@ def update_note(note_id, user_id, title, body):
             return False, "note_not_found"
 
         if note_to_update["user_id"] != user_id:
-            logger.warning(f"Operazione non permessa: tentativo di modifica della nota {note_id} da parte di {user_id}")
+            logger.warning("Permission denied: attempt to modify foreign note (Attempting User ID: %s -> Target Note ID: %s)", user_id, note_id)
             return False, "permission_denied"
 
         cursor.execute(
@@ -367,11 +373,11 @@ def update_note(note_id, user_id, title, body):
             (title, body, note_id)
         )
         conn.commit()
-        logger.info(f"Nota {note_id} aggiornata con successo dall'utente {user_id}")
+        logger.info("Note updated: Note ID %s (Owner ID: %s)", note_id, user_id)
         return True, None
 
-    except Error as e:
-        logger.error(f"Errore DB durante la modifica della nota {note_id}: {e}", exc_info=True)
+    except (Error, DatabaseUnavailableError) as e:
+        logger.error("Query failed: modify note ID %s - Error: %s", note_id, e, exc_info=True)
         return False, "DB_error"
     finally:
         if 'cursor' in locals() and cursor:
@@ -387,16 +393,17 @@ def register_user(username, password):
             "INSERT INTO users (username, password) VALUES (%s, %s)",
             (username, hashpw(password_bytes, gensalt()).decode("utf-8"))
         )
+        new_user_id = cursor.lastrowid
         conn.commit()
         
-        logger.info(f"Nuovo utente registrato con successo: {username}")
+        logger.info("Registration successful: User ID %s (Username: '%s')", new_user_id, username)
         return True, None
         
     except IntegrityError:
-        logger.warning(f"Tentativo di registrazione negato: username '{username}' già in uso.")
+        logger.warning("Registration failed: username already in use ('%s')", username)
         return False, "integrity_error"
-    except Error as e:
-        logger.error(f"Errore DB durante la registrazione dell'utente '{username}': {e}", exc_info=True)
+    except (Error, DatabaseUnavailableError) as e:
+        logger.error("Query failed: user registration - Error: %s", e, exc_info=True)
         return False, "DB_error"
     finally:
         if 'cursor' in locals() and cursor:

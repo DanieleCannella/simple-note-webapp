@@ -1,5 +1,5 @@
-from flask import Flask, session, render_template, request, redirect, url_for, flash
-from flask_wtf.csrf import CSRFProtect
+from flask import Flask, session, render_template, request, redirect, url_for, flash, jsonify, has_request_context
+from flask_wtf.csrf import CSRFProtect, CSRFError
 from functools import wraps
 import logging
 import math
@@ -17,11 +17,25 @@ from datetime import datetime, timezone
 
 load_dotenv()
 
+class FlaskUserContextFilter(logging.Filter):
+    def filter(self, record):
+        record.user_context = ""
+        try:
+            if has_request_context() and "user_id" in session:
+                record.user_context = f"| UserID: {session['user_id']} "
+        except Exception:
+            pass
+        return True
+    
+
 logging.basicConfig(
-    level=getattr(logging, os.getenv("LOGGING_LEVEL")),
-    format='%(asctime)s | %(levelname)-8s | [%(filename)s:%(lineno)d - %(funcName)s()] | %(message)s',
+    level=getattr(logging, os.getenv("LOGGING_LEVEL", "INFO")),
+    format='%(asctime)s | %(levelname)-8s | [%(filename)s:%(lineno)d] %(user_context)s| %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
+user_filter = FlaskUserContextFilter()
+for handler in logging.root.handlers:
+    handler.addFilter(user_filter)
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +51,68 @@ app.config['SESSION_PERMANENT'] = False
 app.config['SESSION_REFRESH_EACH_REQUEST'] = True
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=int(os.getenv("SESSION_TIMEOUT_REMEMBER_ME_DAYS")))
 
-
 Session(app)
-
 db_connections.init_app(app)
 
+def wants_json_response():
+    is_api_route = request.path.startswith('/api/')
+    wants_json = request.accept_mimetypes.accept_json and not request.accept_mimetypes.accept_html
+    return is_api_route or wants_json
+
+@app.errorhandler(Exception)
+@app.errorhandler(500)
+def handle_internal_error(e):
+    logger.critical("Unexpected server error: %s", e, exc_info=True)
+    
+    if wants_json_response():
+        return jsonify({
+            "success": False,
+            "error_code": "internal_server_error",
+            "message": "Si è verificato un errore interno del server."
+        }), 500
+        
+    return render_template('500.jinja'), 500
+
+@app.errorhandler(404)
+def handle_not_found_error(e):
+    logger.warning("Page or endpoint not found: %s", request.path)
+    
+    if wants_json_response():
+        return jsonify({
+            "success": False,
+            "error_code": "not_found",
+            "message": "La risorsa richiesta non esiste."
+        }), 404
+        
+    return render_template('404.jinja'), 404
+
+@app.errorhandler(403)
+def handle_forbidden_error(e):
+    logger.warning("Access forbidden: attempt to access protected route %s", request.path)
+    
+    if wants_json_response():
+        return jsonify({
+            "success": False,
+            "error_code": "forbidden",
+            "message": "Accesso negato. Permessi insufficienti."
+        }), 403
+        
+    return render_template('403.jinja'), 403
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    user = session.get("user_id", "Guest")
+    logger.warning("CSRF token validation failed (User ID: %s, Route: %s) - Reason: %s", user, request.path, e.description)
+    
+    if wants_json_response():
+        return jsonify({
+            "success": False,
+            "error_code": "csrf_token_invalid",
+            "message": "Token di sicurezza mancante o scaduto. Ricarica i dati."
+        }), 400
+        
+    flash("La tua sessione di lavoro è scaduta per inattività, oppure la richiesta non è valida. Ti preghiamo di riprovare.", "warning")
+    return redirect(request.referrer or url_for('user_login'))
 
 #in questa funzione non controlliamo che sia scaduta la sessione delle persone che hanno cliccato
 #remember me perchè viene gestito in automatico da flask_session grazione a PERMANENT_SESSION_LIFETIME
@@ -57,8 +128,8 @@ def manage_session_timeout():
     
     if not session.get("remember_me", False):#se non ha "remember_me"
         timeout_seconds = int(os.getenv("SESSION_TIMEOUT_MINUTES", "60")) * 60
-        
         if now - last_activity > timeout_seconds:
+            logger.info("Session expired due to inactivity (User ID: %s)", session["user_id"])
             session.clear()
             return 
 
@@ -78,6 +149,7 @@ def require_staff_login(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if "user_id" not in session or session.get("role_level", 0) < 5:
+            logger.warning("Staff route access denied (User ID: %s, Route: %s)", session.get("user_id", "Guest"), request.path)
             flash("Accesso negato. Area riservata allo staff.", "danger")
             return redirect(url_for("staff_login"))
         return f(*args, **kwargs)
@@ -288,8 +360,8 @@ def index():
 @app.route("/logout")
 def logout():
     user_id = session.get("user_id", "Sconosciuto")
-    logger.info(f"L'utente {user_id} ha effettuato il logout")
     session.clear()
+    logger.info("Logout successful (User ID: %s)", user_id)
     
     flash("Logout effettuato con successo.", "success")
     return redirect(url_for("user_login"))

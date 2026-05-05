@@ -10,16 +10,17 @@ load_dotenv()
 
 logging.basicConfig(
     level=getattr(logging, os.getenv("LOGGING_LEVEL", "INFO")),
-    format='%(asctime)s | %(levelname)-8s | [%(filename)s:%(lineno)d - %(funcName)s()] | %(message)s',
+    format='%(asctime)s | %(levelname)-8s | [%(filename)s:%(lineno)d] | %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
+logger = logging.getLogger(__name__)
 
-logging.info("Inizio l'inizializzazione del database...")
+logger.info("Starting database initialization...")
 
 conn = get_db_connection()
 
 if conn is None:
-    logging.critical("Impossibile connettersi al database. Uscita.")
+    logging.critical("Database connection failed. Exiting.")
     sys.exit(1)
 
 cursor = conn.cursor()
@@ -33,14 +34,14 @@ try:
             if command.strip():
                 cursor.execute(command)
                 
-    logging.info("Schema SQL controllato/eseguito con successo.")
+    logging.info("SQL schema verified and executed successfully.")
 except FileNotFoundError:
-    logging.critical("Impossibile trovare il file 'schema.sql'. Verifica il percorso.")
+    logging.critical("File 'schema.sql' not found. Please verify the path.")
     if cursor: cursor.close()
     if conn: conn.close()
     sys.exit(1)
 except Error as e:
-    logging.critical(f"Errore del database durante la creazione dello schema: {e}")
+    logging.critical("Database error during schema creation: %s", e)
     if cursor: cursor.close()
     if conn: conn.close()
     sys.exit(1)
@@ -50,13 +51,13 @@ try:
     if cursor.fetchone()[0] == 0:
         cursor.execute("INSERT INTO roles (role, level) VALUES (%s, %s)", ("Admin", 10))
         cursor.execute("INSERT INTO roles (role, level) VALUES (%s, %s)", ("Moderator", 5))
-        logging.info("Ruoli di base creati.")
+        logging.info("Base roles created successfully.")
 
     username = "Admin"
     cursor.execute("SELECT count(*) FROM users WHERE username = %s", (username,))
     
     if cursor.fetchone()[0] == 0:
-        logging.info("Creazione dell'utente Admin di default in corso...")
+        logging.info("Creating default Admin user...")
         password = "admin".encode("utf-8")
         
         cursor.execute(
@@ -73,18 +74,18 @@ try:
             """,
             ("Admin", "Admin")
         )
-        logging.info("Utente Admin base configurato con successo.")
+        logging.info("Default Admin user configured successfully.")
     else:
-        logging.info("Il database è già inizializzato (Admin e ruoli già presenti).")
+        logging.info("Database is already initialized (Admin and roles present).")
 
     conn.commit()
 
 except Error as e:
-    logging.critical(f"Errore del database durante l'inserimento dei dati iniziali: {e}", exc_info=True)
+    logging.critical("Database error during initial data insertion: %s", e, exc_info=True)
     conn.rollback()
 finally:
     if cursor:
         cursor.close()
     if conn:
         conn.close()
-    logging.info("Connessione al database chiusa correttamente. Script terminato.")
+    logging.info("Database connection closed gracefully. Script terminated.")
